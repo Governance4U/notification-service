@@ -34,7 +34,7 @@ public class ServiceBusConsumerService : BackgroundService
                 ?? throw new InvalidOperationException("ServiceBus:QueueName not configured");
 
             _logger.LogInformation("Starting Service Bus Consumer Service");
-            _logger.LogInformation("Queue: {QueueName}", queueName);
+            _logger.LogDebug("Queue configured: {QueueName}", queueName);
 
             _client = new ServiceBusClient(connectionString);
             _processor = _client.CreateProcessor(queueName, new ServiceBusProcessorOptions
@@ -49,7 +49,7 @@ public class ServiceBusConsumerService : BackgroundService
             _processor.ProcessErrorAsync += ProcessErrorHandler;
 
             await _processor.StartProcessingAsync(stoppingToken);
-            _logger.LogInformation("Service Bus Consumer Service started successfully. Listening for messages...");
+            _logger.LogInformation("Service Bus Consumer Service started successfully and listening");
 
             await Task.Delay(Timeout.Infinite, stoppingToken);
         }
@@ -67,7 +67,7 @@ public class ServiceBusConsumerService : BackgroundService
         {
             var messageBody = args.Message.Body.ToString();
             
-            _logger.LogInformation("Received message {MessageId}: {MessageBody}", messageId, messageBody);
+            _logger.LogDebug("Received message {MessageId}", messageId);
 
             NotificationMessage? message = null;
             try
@@ -93,7 +93,7 @@ public class ServiceBusConsumerService : BackgroundService
                     message.Body,
                     args.CancellationToken);
 
-                _logger.LogInformation("Email notification sent successfully to {Recipient}", message.Recipient);
+                _logger.LogDebug("Email queued for {Recipient}", message.Recipient);
             }
 
             await args.CompleteMessageAsync(args.Message, args.CancellationToken);

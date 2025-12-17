@@ -41,7 +41,7 @@ public class EmailSenderService : IEmailSenderService
                         retryCount, timeSpan.TotalSeconds);
                 });
         
-        _logger.LogInformation("Email Sender Service initialized with sender: {SenderAddress}", _senderAddress);
+        _logger.LogInformation("Email Sender Service initialized");
     }
 
     public async Task SendEmailAsync(
@@ -54,7 +54,7 @@ public class EmailSenderService : IEmailSenderService
         {
             try
             {
-                _logger.LogInformation("Sending email to {Recipient} with subject: {Subject}", recipient, subject);
+                _logger.LogDebug("Sending email to {Recipient}", recipient);
 
                 var emailContent = new EmailContent(subject)
                 {

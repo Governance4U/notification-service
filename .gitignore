@@ -22,11 +22,10 @@ bld/
 # Visual Studio 2015/2017 cache/options directory
 .vs/
 
-# Configuration files with secrets
-appsettings.Development.json
-appsettings.*.json
-!appsettings.json
-!appsettings.Production.json
+ # Configuration files with secrets
+ appsettings.Development.json
+ appsettings.*.json
+ !appsettings.json
 
 # Published output
 publish/
