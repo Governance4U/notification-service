@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
+using NotificationService.Contracts;
 
 namespace NotificationService.Services;
 
@@ -62,98 +63,47 @@ public class ServiceBusConsumerService : BackgroundService
 
     private async Task ProcessMessageHandler(ProcessMessageEventArgs args)
     {
-        var messageId = args.Message.MessageId;
         try
         {
             var messageBody = args.Message.Body.ToString();
+            var message = JsonSerializer.Deserialize<NotificationMessage>(messageBody);
+
+            if (message is not null && message.Type is "Email")
+            {
+                await _emailSenderService.SendEmailAsync(message.Recipient, message.Subject, message.Body, args.CancellationToken);
+                await args.CompleteMessageAsync(args.Message, args.CancellationToken);
+            }
             
-            _logger.LogDebug("Received message {MessageId}", messageId);
-
-            NotificationMessage? message = null;
-            try
-            {
-                message = JsonSerializer.Deserialize<NotificationMessage>(messageBody);
-            }
-            catch (JsonException)
-            {
-                _logger.LogWarning("Failed to parse message as NotificationMessage, treating as plain text");
-                message = new NotificationMessage
-                {
-                    Subject = "Service Bus Notification",
-                    Body = messageBody,
-                    Recipient = _configuration["Notification:DefaultRecipient"] ?? "recipient@example.com"
-                };
-            }
-
-            if (message != null)
-            {
-                await _emailSenderService.SendEmailAsync(
-                    message.Recipient,
-                    message.Subject,
-                    message.Body,
-                    args.CancellationToken);
-
-                _logger.LogDebug("Email queued for {Recipient}", message.Recipient);
-            }
-
-            await args.CompleteMessageAsync(args.Message, args.CancellationToken);
-            _logger.LogInformation("Message {MessageId} completed successfully", messageId);
+            _logger.LogError("Notification type is not defined");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing message {MessageId}. Delivery count: {DeliveryCount}", 
-                messageId, args.Message.DeliveryCount);
-            
-            // Move to dead letter queue after max retries
-            if (args.Message.DeliveryCount >= 3)
-            {
-                _logger.LogWarning("Moving message {MessageId} to dead letter queue after {DeliveryCount} attempts", 
-                    messageId, args.Message.DeliveryCount);
-                await args.DeadLetterMessageAsync(args.Message, 
-                    deadLetterReason: "MaxDeliveryAttemptsExceeded",
-                    deadLetterErrorDescription: ex.Message,
-                    cancellationToken: args.CancellationToken);
-            }
-            else
-            {
-                await args.AbandonMessageAsync(args.Message, cancellationToken: args.CancellationToken);
-            }
+            _logger.LogError(ex, "Error sending email; abandoning message");
+            await args.AbandonMessageAsync(args.Message, cancellationToken: args.CancellationToken);
         }
     }
 
     private Task ProcessErrorHandler(ProcessErrorEventArgs args)
     {
-        _logger.LogError(args.Exception,
-            "Error in Service Bus Consumer. Source: {ErrorSource}, Entity: {EntityPath}",
-            args.ErrorSource,
-            args.EntityPath);
-
+        _logger.LogError(args.Exception, "Service Bus error: {ErrorSource} - {EntityPath}", args.ErrorSource, args.EntityPath);
         return Task.CompletedTask;
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Stopping Service Bus Consumer Service");
-
         if (_processor != null)
         {
             await _processor.StopProcessingAsync(cancellationToken);
             await _processor.DisposeAsync();
+            _processor = null;
         }
-
+        
         if (_client != null)
         {
             await _client.DisposeAsync();
+            _client = null;
         }
 
         await base.StopAsync(cancellationToken);
-        _logger.LogInformation("Service Bus Consumer Service stopped");
     }
-}
-
-public class NotificationMessage
-{
-    public string Recipient { get; set; } = string.Empty;
-    public string Subject { get; set; } = string.Empty;
-    public string Body { get; set; } = string.Empty;
 }
