@@ -1,30 +1,27 @@
 # NotificationService
 
-A .NET 10 console application that continuously listens for messages from Azure Event Hub and sends email notifications using Azure Communication Services.
+A .NET 10 console application that continuously listens for messages from Azure Service Bus Queue and sends email notifications using Azure Communication Services.
 
 ## Overview
 
 This service is designed to run as an always-on background service that:
-- Connects to Azure Event Hub and listens for incoming events
-- Processes each event and extracts notification information
+- Connects to Azure Service Bus Queue and listens for incoming messages
+- Processes each message and extracts notification information
 - Sends email notifications using Azure Communication Services Email SDK
-- Maintains checkpoints using Azure Blob Storage for reliable event processing
 
 ## Architecture
 
-- **EventHubConsumerService**: Background service that continuously processes Event Hub messages
+- **ServiceBusConsumerService**: Background service that continuously processes Service Bus Queue messages
 - **EmailSenderService**: Handles email sending through Azure Communication Services
-- **Azure Blob Storage**: Checkpoint management for reliable message processing
 
 ## Prerequisites
 
 Before running the application, ensure you have:
 
 1. **.NET 10 SDK** installed on your machine
-2. **Azure Event Hub** namespace and event hub created
-3. **Azure Storage Account** for checkpoint management
-4. **Azure Communication Services** resource with Email service configured
-5. A **verified domain** connected to Azure Communication Services
+2. **Azure Service Bus** namespace and queue created
+3. **Azure Communication Services** resource with Email service configured
+4. A **verified domain** connected to Azure Communication Services
 
 ## Configuration
 
@@ -34,14 +31,9 @@ Copy the template and fill in your Azure resource details:
 
 ```json
 {
-  "EventHub": {
-    "FullyQualifiedNamespace": "YOUR_EVENTHUB_NAMESPACE.servicebus.windows.net",
-    "EventHubName": "YOUR_EVENTHUB_NAME",
-    "ConsumerGroup": "$Default"
-  },
-  "BlobStorage": {
-    "ConnectionString": "YOUR_BLOB_STORAGE_CONNECTION_STRING",
-    "ContainerName": "eventhub-checkpoints"
+  "ServiceBus": {
+    "ConnectionString": "YOUR_SERVICE_BUS_CONNECTION_STRING",
+    "QueueName": "notifications"
   },
   "Email": {
     "ConnectionString": "YOUR_EMAIL_COMMUNICATION_SERVICE_CONNECTION_STRING",
@@ -55,15 +47,11 @@ Copy the template and fill in your Azure resource details:
 
 ### 2. Get Azure Resource Connection Strings
 
-#### Event Hub Connection Details:
-1. Go to Azure Portal → Event Hubs Namespace
-2. Note the **namespace** (e.g., `mynamespace.servicebus.windows.net`)
-3. Note your **event hub name**
-
-#### Blob Storage Connection String:
-1. Go to Azure Portal → Storage Account
-2. Under "Security + networking" → "Access keys"
+#### Service Bus Connection String:
+1. Go to Azure Portal → Service Bus Namespace
+2. Under "Settings" → "Shared access policies"
 3. Copy the connection string
+4. Create a queue named "notifications" (or update QueueName in config)
 
 #### Azure Communication Services Email Connection String:
 1. Go to Azure Portal → Communication Services
@@ -76,16 +64,15 @@ Copy the template and fill in your Azure resource details:
 You can also use environment variables instead of appsettings.json:
 
 ```bash
-export EventHub__FullyQualifiedNamespace="mynamespace.servicebus.windows.net"
-export EventHub__EventHubName="myeventhub"
-export BlobStorage__ConnectionString="DefaultEndpointsProtocol=https;..."
+export ServiceBus__ConnectionString="Endpoint=sb://..."
+export ServiceBus__QueueName="notifications"
 export Email__ConnectionString="endpoint=https://...;accesskey=..."
 export Email__SenderAddress="donotreply@yourdomain.com"
 ```
 
 ## Message Format
 
-The service expects Event Hub messages in JSON format:
+The service expects Service Bus messages in JSON format:
 
 ```json
 {
@@ -114,86 +101,56 @@ If a message is not in JSON format or cannot be parsed, it will be treated as pl
 3. **Stop the application:**
    Press `Ctrl+C`
 
-### Production Deployment
+### Azure App Service Deployment
 
-For production deployment, you can:
+#### Option 1: GitHub Actions (Recommended)
+Use the included CI/CD pipeline:
+
+1. **Set up Azure credentials** in GitHub repository secrets
+2. **Configure repository variables:**
+   - `AZURE_CLIENT_ID`
+   - `AZURE_TENANT_ID`
+   - `AZURE_SUBSCRIPTION_ID`
+   - `AZURE_WEBAPP_NAME`
+3. **Run the workflow** from Actions tab
+4. **Configure App Settings** in Azure Portal (see below)
+
+#### Option 2: Manual Deployment
+Deploy directly to Azure App Service:
 
 1. **Publish the application:**
    ```bash
-   dotnet publish -c Release -o ./publish
+   dotnet publish -c Release
    ```
 
-2. **Run as a service:**
-   - **Windows**: Use Windows Service or Task Scheduler
-   - **Linux**: Use systemd service
-   - **Docker**: Create a Dockerfile and run as a container
-   - **Azure**: Deploy to Azure App Service or Azure Container Apps
+2. **Deploy to Azure:**
+   ```bash
+   az webapp up \
+     --name your-notification-service \
+     --resource-group your-resource-group \
+     --runtime "DOTNETCORE:10.0" \
+     --sku B1
+   ```
 
-## Running as a Linux Systemd Service
+3. **Configure App Settings in Azure Portal:**
+   - Navigate to your App Service → Configuration → Application settings
+   - Add the following settings:
+     - `ServiceBus__ConnectionString`
+     - `ServiceBus__QueueName`
+     - `Email__ConnectionString`
+     - `Email__SenderAddress`
+     - `Notification__DefaultRecipient`
+     - `Logging__LogLevel__Default` (optional, default: Information)
 
-Create a service file `/etc/systemd/system/notificationservice.service`:
-
-```ini
-[Unit]
-Description=Notification Service
-After=network.target
-
-[Service]
-Type=notify
-WorkingDirectory=/opt/notificationservice
-ExecStart=/usr/bin/dotnet /opt/notificationservice/NotificationService.dll
-Restart=always
-RestartSec=10
-SyslogIdentifier=notificationservice
-User=www-data
-Environment=DOTNET_ENVIRONMENT=Production
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
-```bash
-sudo systemctl enable notificationservice
-sudo systemctl start notificationservice
-sudo systemctl status notificationservice
-```
-
-## Docker Deployment
-
-Create a `Dockerfile`:
-
-```dockerfile
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
-WORKDIR /src
-COPY . .
-RUN dotnet restore
-RUN dotnet publish -c Release -o /app
-
-FROM mcr.microsoft.com/dotnet/runtime:9.0
-WORKDIR /app
-COPY --from=build /app .
-ENTRYPOINT ["dotnet", "NotificationService.dll"]
-```
-
-Build and run:
-```bash
-docker build -t notificationservice .
-docker run -d --name notificationservice \
-  -e EventHub__FullyQualifiedNamespace="..." \
-  -e EventHub__EventHubName="..." \
-  -e BlobStorage__ConnectionString="..." \
-  -e Email__ConnectionString="..." \
-  -e Email__SenderAddress="..." \
-  notificationservice
-```
+4. **Enable Always On** (under Configuration → General settings) to keep the service running continuously
+5. **Recommended SKU**: B2 or higher for production workloads
 
 ## Monitoring and Logging
 
 The application uses structured logging with the following log levels:
-- **Information**: Normal operation logs (events received, emails sent)
+- **Information**: Normal operation logs (messages received, emails sent)
 - **Warning**: Non-critical issues (message parsing failures)
-- **Error**: Processing errors (email send failures, Event Hub errors)
+- **Error**: Processing errors (email send failures, Service Bus errors)
 - **Critical**: Fatal application errors
 
 View logs:
@@ -201,20 +158,16 @@ View logs:
 # Local development
 dotnet run
 
-# Systemd service
-sudo journalctl -u notificationservice -f
-
-# Docker
-docker logs -f notificationservice
+# Azure App Service
+az webapp log tail --name your-notification-service --resource-group your-resource-group
 ```
 
 ## Error Handling
 
 The service includes comprehensive error handling:
-- **Event processing errors**: Logged but don't stop the service
+- **Message processing errors**: Logged but don't stop the service; messages are abandoned for retry
 - **Email send failures**: Logged with detailed error information
-- **Connection issues**: Automatic retry with exponential backoff
-- **Checkpointing**: Ensures messages are not lost on restart
+- **Connection issues**: Automatic retry via Service Bus built-in mechanisms
 
 ## Security Best Practices
 
@@ -232,11 +185,11 @@ The service includes comprehensive error handling:
 - Check firewall rules allow outbound connections
 - Review logs for specific error messages
 
-### Events not being received
-- Verify Event Hub is receiving messages (check Azure Portal metrics)
-- Check consumer group name matches
-- Ensure checkpoint container exists in Blob Storage
-- Verify Event Hub namespace URL is correct
+### Messages not being received
+- Verify Service Bus queue is receiving messages (check Azure Portal metrics)
+- Check queue name matches configuration
+- Verify Service Bus connection string is correct
+- Ensure queue exists in the namespace
 
 ### Emails not being sent
 - Verify Email Communication Service connection string
@@ -246,10 +199,10 @@ The service includes comprehensive error handling:
 
 ## Performance Considerations
 
-- The service processes events in parallel across partitions
-- Checkpointing ensures at-least-once delivery
+- The service processes messages sequentially by default
+- Failed messages are automatically retried by Service Bus
 - Email sending is non-blocking and asynchronous
-- Consider scaling Event Hub partitions for high throughput
+- Scale out by deploying multiple instances for higher throughput
 
 ## License
 

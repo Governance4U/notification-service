@@ -15,14 +15,19 @@ var host = Host.CreateDefaultBuilder(args)
     {
         // Register services
         services.AddSingleton<IEmailSenderService, EmailSenderService>();
-        services.AddHostedService<EventHubConsumerService>();
+        services.AddHostedService<ServiceBusConsumerService>();
+        
+        // Add health checks
+        services.AddHealthChecks();
     })
     .ConfigureLogging((context, logging) =>
     {
         logging.ClearProviders();
         logging.AddConsole();
-        logging.AddDebug();
-        logging.SetMinimumLevel(LogLevel.Information);
+        
+        var logLevel = context.Configuration.GetValue<string>("Logging:LogLevel:Default");
+        logging.SetMinimumLevel(
+            Enum.TryParse<LogLevel>(logLevel, out var level) ? level : LogLevel.Information);
     })
     .Build();
 

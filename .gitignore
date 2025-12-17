@@ -26,6 +26,11 @@ bld/
 appsettings.Development.json
 appsettings.*.json
 !appsettings.json
+!appsettings.Production.json
+
+# Published output
+publish/
+*.zip
 
 # .NET Core
 project.lock.json
